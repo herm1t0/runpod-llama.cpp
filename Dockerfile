@@ -75,9 +75,19 @@ RUN apt-get update \
  && /opt/venv/bin/pip install "runpod>=1.7" requests "huggingface_hub>=0.30"
 ENV PATH="/opt/venv/bin:$PATH"
 
-# --version заодно проверяет, что бинарник слинковался с CUDA-рантаймом базового образа.
 COPY --from=builder /src/llama.cpp/build/bin/llama-server /app/llama-server
-RUN /app/llama-server --version
+
+# Запускать бинарник на этапе сборки нельзя: ggml-cuda линкует CUDA::cuda_driver
+# (GGML_CUDA_NO_VMM=OFF по умолчанию), поэтому libcuda.so.1 оказывается в DT_NEEDED, а в
+# сборочном контейнере драйвера NVIDIA нет -- он инжектится только при старте на GPU-хосте.
+# Поэтому `llama-server --version` здесь упал бы с exit 127 "cannot open shared object file".
+# Вместо запуска проверяем, что не разрешена ровно одна зависимость -- драйвер.
+RUN set -e; \
+    test -x /app/llama-server; \
+    ldd /app/llama-server > /tmp/ldd.txt 2>&1 || true; \
+    cat /tmp/ldd.txt; \
+    unresolved="$(grep 'not found' /tmp/ldd.txt | grep -vE 'libcuda\.so\.1|libnvidia' || true)"; \
+    if [ -n "$unresolved" ]; then echo "unresolved runtime libraries:"; echo "$unresolved"; exit 1; fi
 
 WORKDIR /worker
 COPY handler.py /worker/handler.py
