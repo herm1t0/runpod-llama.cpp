@@ -1,0 +1,21 @@
+# Используем официальный образ llama.cpp с CUDA
+FROM ghcr.io/ggml-org/llama.cpp:server-cuda
+
+# Устанавливаем Python и huggingface_hub
+RUN apt-get update && apt-get install -y python3 python3-pip && \
+    pip3 install huggingface_hub && \
+    rm -rf /var/lib/apt/lists/*
+
+# Аргументы для гибкости (можно менять при сборке)
+ARG HF_REPO="bartowski/Qwen3-32B-GGUF"
+ARG HF_FILE="Qwen3-32B-Q4_K_M.gguf"
+
+# Скачиваем модель на этапе сборки
+RUN python3 -c "from huggingface_hub import hf_hub_download; \
+    hf_hub_download(repo_id='${HF_REPO}', filename='${HF_FILE}', local_dir='/models')"
+
+ENV MODEL_PATH="/models/${HF_FILE}"
+ENV PORT=8080
+EXPOSE 8080
+
+CMD ["sh", "-c", "llama-server --model $MODEL_PATH --host 0.0.0.0 --port $PORT --n-gpu-layers 99"]
